@@ -1,26 +1,34 @@
 # Redis instrumentation contributed by Ashley Martens of ngmoco
-#
+#                       updated by Jesse Newland of Rails Machine
 
-if defined?(::Redis) and not  NewRelic::Control.instance['disable_redis']
-  
-  ::Redis.class_eval do 
-    
-    include NewRelic::Agent::MethodTracer
-    
-    def raw_call_command_with_newrelic_trace *args
-      method_name = args[0].is_a?(Array) ? args[0][0] : args[0]
-      metrics = ["Database/Redis/#{method_name}",
-                 (NewRelic::Agent::Instrumentation::MetricFrame.recording_web_transaction? ? 'Database/Redis/allWeb' : 'Database/Redis/allOther')]
-      self.class.trace_execution_scoped(metrics) do
-        # NewRelic::Control.instance.log.debug("Instrumenting Redis Call[#{method_name}]: #{args[0].inspect}")
-        raw_call_command_without_newrelic_trace(*args)
+if (defined?(::Redis::Client) && !NewRelic::Control.instance['disable_redis'])
+
+  class Redis
+    class Client
+
+      include NewRelic::Agent::MethodTracer
+
+      def logging_with_newrelic_trace(commands, &block)
+        metrics = []
+        if NewRelic::Agent::Instrumentation::MetricFrame.recording_web_transaction?
+          metrics << 'Database/Redis/allWeb'
+        else
+          metrics << 'Database/Redis/allOther'
+        end
+        commands.each do |name, *args|
+          method_name = name.to_s
+          metrics << "Database/Redis/#{method_name}"
+          # NewRelic::Control.instance.log.debug("Instrumenting Redis Call[#{method_name}], #{metrics.join(',')}")
+        end
+        self.class.trace_execution_scoped(metrics) do
+          logging_without_newrelic_trace(commands, &block)
+        end
       end
-    end
-    
-    # alias_method_chain :raw_call_command, :newrelic_trace
-    alias raw_call_command_without_newrelic_trace raw_call_command
-    alias raw_call_command raw_call_command_with_newrelic_trace
-    
-  end
 
+      # alias_method_chain :raw_call_command, :newrelic_trace
+      alias logging_without_newrelic_trace logging
+      alias logging logging_with_newrelic_trace
+
+    end
+  end
 end
